@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Air Canvas — Hand Tracking</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #webcam {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.35;
+    }
+
+    #drawCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #overlayCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    /* ── Top UI bar ── */
+    #ui {
+      position: absolute;
+      top: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px 18px;
+      border-radius: 60px;
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      z-index: 10;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .section-label {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      width: 1px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .color-dot {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: transform 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+
+    .color-dot:hover { transform: scale(1.15); }
+    .color-dot.active {
+      border-color: #fff;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+      transform: scale(1.2);
+    }
+
+    #customColorWrap {
+      position: relative;
+      width: 24px;
+      height: 24px;
+    }
+
+    #customColorWrap input[type="color"] {
+      opacity: 0;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+      border: none;
+    }
+
+    #customColorPreview {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px dashed rgba(255,255,255,0.4);
+      background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+      pointer-events: none;
+    }
+
+    #brushSizeSlider {
+      -webkit-appearance: none;
+      width: 80px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.2);
+      outline: none;
+      cursor: pointer;
+    }
+
+    #brushSizeSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    #sizeVal {
+      font-size: 12px;
+      font-weight: 500;
+      min-width: 20px;
+      text-align: center;
+      color: rgba(255,255,255,0.7);
+    }
+
+    #opacitySlider {
+      -webkit-appearance: none;
+      width: 70px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.2);
+      outline: none;
+      cursor: pointer;
+    }
+
+    #opacitySlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .tool-btn {
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 30px;
+      padding: 4px 12px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+
+    .tool-btn:hover { background: rgba(255,255,255,0.14); }
+    .tool-btn.active {
+      background: rgba(255,255,255,0.2);
+      border-color: rgba(255,255,255,0.35);
+      color: #fff;
+    }
+
+    /* ── Status bar ── */
+    #statusBar {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.6);
+      padding: 8px 22px;
+      border-radius: 60px;
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      z-index: 10;
+      white-space: nowrap;
+    }
+
+    /* ── Gesture legend ── */
+    #legend {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0, 0, 0, 0.55);
+      padding: 14px 16px;
+      border-radius: 14px;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.07);
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 180px;
+    }
+
+    #legend h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: rgba(255,255,255,0.35);
+      margin-bottom: 2px;
+    }
+
+    .gesture-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .gesture-icon {
+      font-size: 20px;
+      width: 28px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .gesture-desc {
+      font-size: 12px;
+      color: rgba(255,255,255,0.65);
+      line-height: 1.4;
+    }
+
+    .gesture-desc strong {
+      color: #fff;
+      font-weight: 500;
+    }
+
+    /* ── Start screen ── */
+    #startScreen {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 100%);
+      gap: 20px;
+    }
+
+    #startScreen h1 {
+      font-size: 36px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #a78bfa, #60a5fa, #34d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    #startScreen p {
+      font-size: 15px;
+      color: rgba(255,255,255,0.5);
+      max-width: 340px;
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    #launchBtn {
+      font-size: 15px;
+      font-weight: 500;
+      padding: 13px 32px;
+      border-radius: 60px;
+      border: none;
+      background: linear-gradient(135deg, #5B5FED, #8B5CF6);
+      color: #fff;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.15s;
+      box-shadow: 0 8px 32px rgba(91,95,237,0.4);
+    }
+
+    #launchBtn:hover { opacity: 0.88; transform: scale(1.03); }
+    #launchBtn:active { transform: scale(0.97); }
+
+    .mini-legend {
+      display: flex;
+      gap: 20px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .mini-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.45);
+    }
+
+    #errorMsg {
+      color: #E24B4A;
+      font-size: 13px;
+      display: none;
+    }
+
+    /* ── Loading overlay ── */
+    #loadingOverlay {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      background: rgba(10,10,10,0.85);
+      gap: 16px;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid rgba(255,255,255,0.1);
+      border-top-color: #8B5CF6;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #loadingText {
+      font-size: 14px;
+      color: rgba(255,255,255,0.6);
+    }
+
+    /* ── Save button ── */
+    #saveBtn {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10;
+      font-size: 12px;
+      color: rgba(255,255,255,0.7);
+      background: rgba(0,0,0,0.55);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 30px;
+      padding: 7px 16px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: background 0.15s;
+    }
+
+    #saveBtn:hover { background: rgba(255,255,255,0.1); }
+
+    /* ── Gesture flash ── */
+    #gestureFlash {
+      position: absolute;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      font-size: 14px;
+      padding: 7px 18px;
+      border-radius: 30px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 20;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+
+<div id="container">
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="drawCanvas"></canvas>
+  <canvas id="overlayCanvas"></canvas>
+
+  <!-- Toolbar -->
+  <div id="ui">
+    <span class="section-label">Color</span>
+    <div class="color-dot active" data-color="#5B5FED" style="background:#5B5FED" title="Indigo"></div>
+    <div class="color-dot" data-color="#E24B4A" style="background:#E24B4A" title="Red"></div>
+    <div class="color-dot" data-color="#1D9E75" style="background:#1D9E75" title="Green"></div>
+    <div class="color-dot" data-color="#EF9F27" style="background:#EF9F27" title="Amber"></div>
+    <div class="color-dot" data-color="#D4537E" style="background:#D4537E" title="Pink"></div>
+    <div class="color-dot" data-color="#60a5fa" style="background:#60a5fa" title="Blue"></div>
+    <div class="color-dot" data-color="#ffffff" style="background:#fff" title="White"></div>
+    <div id="customColorWrap" title="Custom color">
+      <div id="customColorPreview"></div>
+      <input type="color" id="customColor" value="#5B5FED">
+    </div>
+
+    <div class="divider"></div>
+    <span class="section-label">Size</span>
+    <input type="range" id="brushSizeSlider" min="2" max="40" value="8" step="1">
+    <span id="sizeVal">8</span>
+
+    <div class="divider"></div>
+    <span class="section-label">Opacity</span>
+    <input type="range" id="opacitySlider" min="10" max="100" value="100" step="5">
+
+    <div class="divider"></div>
+    <span class="section-label">Mode</span>
+    <button class="tool-btn active" id="btnPen">✏️ Pen</button>
+    <button class="tool-btn" id="btnSpray">💨 Spray</button>
+
+    <div class="divider"></div>
+    <button class="tool-btn" id="clearBtn">🗑 Clear</button>
+  </div>
+
+  <!-- Gesture legend -->
+  <div id="legend">
+    <h3>Gestures</h3>
+    <div class="gesture-row">
+      <span class="gesture-icon">☝️</span>
+      <span class="gesture-desc"><strong>Index only</strong><br>Draw</span>
+    </div>
+    <div class="gesture-row">
+      <span class="gesture-icon">✌️</span>
+      <span class="gesture-desc"><strong>Index + middle</strong><br>Hover / pause</span>
+    </div>
+    <div class="gesture-row">
+      <span class="gesture-icon">🤏</span>
+      <span class="gesture-desc"><strong>Pinch tips close</strong><br>Erase</span>
+    </div>
+    <div class="gesture-row">
+      <span class="gesture-icon">🖐</span>
+      <span class="gesture-desc"><strong>4 fingers up</strong><br>Hold to clear</span>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div id="statusBar">Enable camera to begin</div>
+
+  <!-- Gesture flash -->
+  <div id="gestureFlash"></div>
+
+  <!-- Save -->
+  <button id="saveBtn">💾 Save PNG</button>
+
+  <!-- Loading overlay -->
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div id="loadingText">Loading hand tracker…</div>
+  </div>
+
+  <!-- Start screen -->
+  <div id="startScreen">
+    <h1>Air Canvas</h1>
+    <p>Draw in mid-air with your hand. No touch needed — just your camera and your fingers.</p>
+    <button id="launchBtn">Enable Camera</button>
+    <div class="mini-legend">
+      <div class="mini-item">☝️ Draw</div>
+      <div class="mini-item">✌️ Pause</div>
+      <div class="mini-item">🤏 Erase</div>
+      <div class="mini-item">🖐 Clear</div>
+    </div>
+    <div id="errorMsg"></div>
+  </div>
+</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AIR CANVAS — high-speed, stable, sharp gesture engine
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Elements ──────────────────────────────────────────────────────────────────
+const video          = document.getElementById('webcam');
+const drawCanvas     = document.getElementById('drawCanvas');
+const overlayCanvas  = document.getElementById('overlayCanvas');
+const dCtx           = drawCanvas.getContext('2d');
+const oCtx           = overlayCanvas.getContext('2d');
+const statusBar      = document.getElementById('statusBar');
+const startScreen    = document.getElementById('startScreen');
+const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingText    = document.getElementById('loadingText');
+const errorMsg       = document.getElementById('errorMsg');
+const gestureFlash   = document.getElementById('gestureFlash');
+const brushSlider    = document.getElementById('brushSizeSlider');
+const sizeVal        = document.getElementById('sizeVal');
+const opacitySlider  = document.getElementById('opacitySlider');
+const btnPen         = document.getElementById('btnPen');
+const btnSpray       = document.getElementById('btnSpray');
+const clearBtn       = document.getElementById('clearBtn');
+const saveBtn        = document.getElementById('saveBtn');
+const customColor    = document.getElementById('customColor');
+const customPreview  = document.getElementById('customColorPreview');
+
+const MEDIAPIPE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/';
+
+// ── Drawing state ─────────────────────────────────────────────────────────────
+let currentColor = '#5B5FED';
+let brushSize    = 8;
+let opacity      = 1.0;
+let mode         = 'pen';
+let flashTimer   = null;
+
+// ── Tip smoothing (ONE EMA layer, high alpha = fast & responsive) ─────────────
+// Alpha 0.5 means 50% weight to new position every frame → snappy but stable
+const TIP_ALPHA = 0.50;
+let tipX = null, tipY = null;
+
+// ── Eraser EMA (slightly smoother so eraser doesn't flicker) ──────────────────
+const ERASE_ALPHA = 0.45;
+let eraseX = null, eraseY = null;
+
+// ── Quadratic bezier drawing state ───────────────────────────────────────────
+let prevDrawX = null, prevDrawY = null;   // previous committed point
+let midX      = null, midY      = null;   // midpoint for bezier control
+
+// ── Gesture debounce — requires N consecutive frames before switching ─────────
+// This prevents accidental gesture flickers without adding visual lag
+const GESTURE_CONFIRM = 3;    // frames needed to confirm a new gesture
+let pendingGesture    = '';
+let pendingCount      = 0;
+let activeGesture     = '';   // currently locked-in gesture
+
+// ── Clear hold counter ────────────────────────────────────────────────────────
+let clearHold = 0;
+const CLEAR_FRAMES = 40;
+
+// ── Spray interval ────────────────────────────────────────────────────────────
+let sprayTimer = null;
+let sprayX = 0, sprayY = 0;
+
+// ── Resize canvases ───────────────────────────────────────────────────────────
+function resize() {
+  [drawCanvas, overlayCanvas].forEach(c => {
+    c.width  = window.innerWidth;
+    c.height = window.innerHeight;
+  });
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── UI: color palette ─────────────────────────────────────────────────────────
+document.querySelectorAll('.color-dot').forEach(dot => {
+  dot.addEventListener('click', () => {
+    document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+    dot.classList.add('active');
+    currentColor = dot.dataset.color;
+  });
+});
+customColor.addEventListener('input', e => {
+  currentColor = e.target.value;
+  customPreview.style.background = currentColor;
+  document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+});
+
+// ── UI: brush & opacity ───────────────────────────────────────────────────────
+brushSlider.addEventListener('input', () => {
+  brushSize = parseInt(brushSlider.value);
+  sizeVal.textContent = brushSize;
+});
+opacitySlider.addEventListener('input', () => {
+  opacity = parseInt(opacitySlider.value) / 100;
+});
+
+// ── UI: mode buttons ──────────────────────────────────────────────────────────
+btnPen.addEventListener('click', () => {
+  mode = 'pen';
+  btnPen.classList.add('active');
+  btnSpray.classList.remove('active');
+  stopSpray();
+});
+btnSpray.addEventListener('click', () => {
+  mode = 'spray';
+  btnSpray.classList.add('active');
+  btnPen.classList.remove('active');
+});
+
+// ── UI: clear & save ──────────────────────────────────────────────────────────
+clearBtn.addEventListener('click', () => {
+  dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  resetDrawState();
+  showFlash('Canvas cleared');
+});
+
+saveBtn.addEventListener('click', () => {
+  const tmp = document.createElement('canvas');
+  tmp.width  = drawCanvas.width;
+  tmp.height = drawCanvas.height;
+  const tc = tmp.getContext('2d');
+  tc.fillStyle = '#0a0a0a';
+  tc.fillRect(0, 0, tmp.width, tmp.height);
+  tc.save();
+  tc.translate(tmp.width, 0); tc.scale(-1, 1);
+  tc.globalAlpha = 0.35;
+  tc.drawImage(video, 0, 0, tmp.width, tmp.height);
+  tc.restore();
+  tc.drawImage(drawCanvas, 0, 0);
+  const a = document.createElement('a');
+  a.download = 'air-canvas.png';
+  a.href = tmp.toDataURL('image/png');
+  a.click();
+  showFlash('Saved!');
+});
+
+// ── Flash message ─────────────────────────────────────────────────────────────
+function showFlash(msg) {
+  gestureFlash.textContent = msg;
+  gestureFlash.style.opacity = '1';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { gestureFlash.style.opacity = '0'; }, 1400);
+}
+
+// ── Reset drawing continuity ──────────────────────────────────────────────────
+function resetDrawState() {
+  prevDrawX = null; prevDrawY = null;
+  midX = null; midY = null;
+}
+
+// ── EMA helper ────────────────────────────────────────────────────────────────
+function ema(prev, next, alpha) {
+  if (prev === null) return next;
+  return prev + alpha * (next - prev);
+}
+
+// ── Map normalised landmark → canvas px (mirror X) ───────────────────────────
+function lx(lm, i) { return (1 - lm[i].x) * overlayCanvas.width;  }
+function ly(lm, i) { return        lm[i].y  * overlayCanvas.height; }
+
+// ── Finger-up check (tip Y above pip Y in normalised space) ──────────────────
+function up(lm, tip, pip) { return lm[tip].y < lm[pip].y; }
+
+// ── Classify gesture from raw landmarks ──────────────────────────────────────
+// Returns: 'draw' | 'erase' | 'hover' | 'clear' | 'idle'
+function classifyGesture(lm) {
+  const idxUp  = up(lm, 8,  6);
+  const midUp  = up(lm, 12, 10);
+  const ringUp = up(lm, 16, 14);
+  const pnkUp  = up(lm, 20, 18);
+
+  // All four fingers up → clear hold
+  if (idxUp && midUp && ringUp && pnkUp) return 'clear';
+
+  // Pinch: index + middle tips very close in normalised space → erase
+  const dx = lm[8].x - lm[12].x;
+  const dy = lm[8].y - lm[12].y;
+  const pinchDist = Math.hypot(dx, dy);
+  if (pinchDist < 0.055 && idxUp && midUp && !ringUp) return 'erase';
+
+  // Only index up → draw
+  if (idxUp && !midUp && !ringUp && !pnkUp) return 'draw';
+
+  // Index + middle up (not close) → hover
+  if (idxUp && midUp && !ringUp && !pnkUp) return 'hover';
+
+  return 'idle';
+}
+
+// ── Debounce: only switch gesture after N consecutive matching frames ─────────
+function debounceGesture(raw) {
+  if (raw === pendingGesture) {
+    pendingCount++;
+  } else {
+    pendingGesture = raw;
+    pendingCount   = 1;
+  }
+  // 'draw' and 'erase' need only 2 frames — keeps them snappy
+  const needed = (raw === 'draw' || raw === 'erase') ? 2 : GESTURE_CONFIRM;
+  if (pendingCount >= needed) {
+    if (activeGesture !== raw) {
+      // gesture switched — clean up old state
+      if (activeGesture === 'draw') resetDrawState();
+      if (activeGesture !== 'erase') { eraseX = null; eraseY = null; }
+      activeGesture = raw;
+      if (raw === 'draw')  showFlash('☝️ Drawing');
+      if (raw === 'erase') showFlash('✌️ Eraser');
+      if (raw === 'hover') showFlash('✌️ Pen up');
+    }
+  }
+  return activeGesture;
+}
+
+// ── Spray helpers ─────────────────────────────────────────────────────────────
+function startSpray() {
+  if (sprayTimer) return;
+  sprayTimer = setInterval(() => {
+    const density = Math.ceil(brushSize * 3.5);
+    dCtx.globalAlpha = opacity * 0.55;
+    dCtx.fillStyle   = currentColor;
+    for (let i = 0; i < density; i++) {
+      const a = Math.random() * 2 * Math.PI;
+      const r = Math.random() * brushSize * 2.2;
+      dCtx.beginPath();
+      dCtx.arc(sprayX + Math.cos(a)*r, sprayY + Math.sin(a)*r, 1, 0, Math.PI*2);
+      dCtx.fill();
+    }
+    dCtx.globalAlpha = 1;
+  }, 30);
+}
+function stopSpray() {
+  if (sprayTimer) { clearInterval(sprayTimer); sprayTimer = null; }
+}
+
+// ── Draw: quadratic bezier midpoint chaining (smooth + fast) ─────────────────
+function strokeTo(x, y) {
+  dCtx.globalAlpha = opacity;
+  dCtx.strokeStyle = currentColor;
+  dCtx.lineWidth   = brushSize;
+  dCtx.lineCap     = 'round';
+  dCtx.lineJoin    = 'round';
+
+  if (prevDrawX === null) {
+    // First point — just a dot
+    dCtx.beginPath();
+    dCtx.arc(x, y, brushSize * 0.5, 0, Math.PI * 2);
+    dCtx.fillStyle = currentColor;
+    dCtx.fill();
+    prevDrawX = x; prevDrawY = y;
+    midX = x; midY = y;
+  } else {
+    // Midpoint between prev and current
+    const newMidX = (prevDrawX + x) * 0.5;
+    const newMidY = (prevDrawY + y) * 0.5;
+
+    dCtx.beginPath();
+    dCtx.moveTo(midX, midY);
+    // Quadratic bezier: control = prev point, end = new midpoint
+    dCtx.quadraticCurveTo(prevDrawX, prevDrawY, newMidX, newMidY);
+    dCtx.stroke();
+
+    midX = newMidX; midY = newMidY;
+    prevDrawX = x;  prevDrawY = y;
+  }
+  dCtx.globalAlpha = 1;
+}
+
+// ── Erase: sharp rectangle stroke along movement path ────────────────────────
+function eraseTo(x, y) {
+  dCtx.save();
+  dCtx.globalCompositeOperation = 'destination-out';
+  const r = brushSize * 2.5 + 12;  // eraser always a bit bigger than brush
+  if (eraseX !== null) {
+    // Stroke a wide line between old and new point = sharp continuous erase
+    dCtx.lineWidth   = r * 2;
+    dCtx.lineCap     = 'round';
+    dCtx.strokeStyle = 'rgba(0,0,0,1)';
+    dCtx.beginPath();
+    dCtx.moveTo(eraseX, eraseY);
+    dCtx.lineTo(x, y);
+    dCtx.stroke();
+  } else {
+    dCtx.beginPath();
+    dCtx.arc(x, y, r, 0, Math.PI * 2);
+    dCtx.fill();
+  }
+  dCtx.restore();
+  // Visual: white ring at current eraser pos
+  oCtx.strokeStyle = 'rgba(255,255,255,0.9)';
+  oCtx.lineWidth   = 2.5;
+  oCtx.setLineDash([]);
+  oCtx.beginPath();
+  oCtx.arc(x, y, brushSize * 2.5 + 12, 0, Math.PI * 2);
+  oCtx.stroke();
+  oCtx.fillStyle = 'rgba(255,255,255,0.06)';
+  oCtx.fill();
+}
+
+// ── Skeleton renderer (lightweight — only key bones) ─────────────────────────
+function drawSkeleton(lm) {
+  const BONES = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [5,9],[9,10],[10,11],[11,12],
+    [9,13],[13,14],[14,15],[15,16],
+    [13,17],[17,18],[18,19],[19,20],[0,17]
+  ];
+  oCtx.strokeStyle = 'rgba(255,255,255,0.15)';
+  oCtx.lineWidth   = 1.2;
+  oCtx.setLineDash([]);
+  for (const [a, b] of BONES) {
+    oCtx.beginPath();
+    oCtx.moveTo(lx(lm,a), ly(lm,a));
+    oCtx.lineTo(lx(lm,b), ly(lm,b));
+    oCtx.stroke();
+  }
+  // Only draw fingertips + wrist as dots
+  for (const i of [0, 4, 8, 12, 16, 20]) {
+    oCtx.beginPath();
+    oCtx.arc(lx(lm,i), ly(lm,i), i===0 ? 4 : 3, 0, Math.PI*2);
+    oCtx.fillStyle = i===8 ? currentColor : 'rgba(255,255,255,0.45)';
+    oCtx.fill();
+  }
+}
+
+// ── Clear-hold progress ring ───────────────────────────────────────────────────
+function drawClearRing(progress) {
+  const cx = overlayCanvas.width / 2, cy = overlayCanvas.height / 2, r = 48;
+  oCtx.strokeStyle = 'rgba(226,75,74,0.18)'; oCtx.lineWidth = 7;
+  oCtx.beginPath(); oCtx.arc(cx, cy, r, 0, Math.PI*2); oCtx.stroke();
+  oCtx.strokeStyle = '#E24B4A'; oCtx.lineWidth = 7; oCtx.lineCap = 'round';
+  oCtx.beginPath();
+  oCtx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + progress*Math.PI*2);
+  oCtx.stroke();
+  oCtx.fillStyle = '#E24B4A';
+  oCtx.font = '500 13px -apple-system, sans-serif';
+  oCtx.textAlign = 'center'; oCtx.textBaseline = 'middle';
+  oCtx.fillText('Hold to clear', cx, cy);
+}
+
+// ── Main onResults — called every camera frame ────────────────────────────────
+function onResults(results) {
+  oCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    // Hand lost — reset everything immediately (no debounce needed)
+    tipX = null; tipY = null;
+    eraseX = null; eraseY = null;
+    resetDrawState(); stopSpray();
+    clearHold = 0;
+    pendingGesture = ''; pendingCount = 0; activeGesture = '';
+    statusBar.textContent = '✋ Show your hand to the camera';
+    return;
+  }
+
+  const lm = results.multiHandLandmarks[0];
+  drawSkeleton(lm);
+
+  // ── Raw gesture classification ───────────────────────────────────────────
+  const rawG   = classifyGesture(lm);
+  const gesture = debounceGesture(rawG);
+
+  // ── Raw index tip position (canvas px) ──────────────────────────────────
+  const rawTipX = lx(lm, 8);
+  const rawTipY = ly(lm, 8);
+
+  // EMA smooth tip — high alpha = fast tracking
+  tipX = ema(tipX, rawTipX, TIP_ALPHA);
+  tipY = ema(tipY, rawTipY, TIP_ALPHA);
+
+  // ── CLEAR ────────────────────────────────────────────────────────────────
+  if (gesture === 'clear') {
+    clearHold++;
+    stopSpray(); resetDrawState();
+    eraseX = null; eraseY = null;
+    const p = Math.min(clearHold / CLEAR_FRAMES, 1);
+    drawClearRing(p);
+    if (clearHold >= CLEAR_FRAMES) {
+      dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      clearHold = 0;
+      showFlash('🗑 Cleared!');
+    }
+    statusBar.textContent = '🖐 Hold to clear…';
+    return;
+  }
+  clearHold = 0;
+
+  // ── ERASE ────────────────────────────────────────────────────────────────
+  if (gesture === 'erase') {
+    stopSpray(); resetDrawState();
+    // Use pinch midpoint for erase position — smooth it separately
+    const rawEX = (lx(lm,8) + lx(lm,12)) * 0.5;
+    const rawEY = (ly(lm,8) + ly(lm,12)) * 0.5;
+    eraseX = ema(eraseX, rawEX, ERASE_ALPHA);
+    eraseY = ema(eraseY, rawEY, ERASE_ALPHA);
+    eraseTo(eraseX, eraseY);
+    statusBar.textContent = '✌️ Erasing';
+    return;
+  }
+  eraseX = null; eraseY = null;
+
+  // ── DRAW ─────────────────────────────────────────────────────────────────
+  if (gesture === 'draw') {
+    // Draw cursor dot at tip
+    oCtx.beginPath();
+    oCtx.arc(tipX, tipY, brushSize * 0.5 + 5, 0, Math.PI * 2);
+    oCtx.strokeStyle = currentColor;
+    oCtx.lineWidth   = 2.5;
+    oCtx.stroke();
+    oCtx.fillStyle = currentColor + '28';
+    oCtx.fill();
+
+    if (mode === 'pen') {
+      stopSpray();
+      strokeTo(tipX, tipY);
+    } else {
+      // Spray: update position each frame, interval does the painting
+      sprayX = tipX; sprayY = tipY;
+      startSpray();
+    }
+    statusBar.textContent = '☝️ Drawing';
+    return;
+  }
+  stopSpray(); resetDrawState();
+
+  // ── HOVER ────────────────────────────────────────────────────────────────
+  if (gesture === 'hover') {
+    oCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+    oCtx.lineWidth   = 1.5;
+    oCtx.setLineDash([4, 4]);
+    oCtx.beginPath();
+    oCtx.arc(tipX, tipY, 16, 0, Math.PI * 2);
+    oCtx.stroke();
+    oCtx.setLineDash([]);
+    statusBar.textContent = '✌️ Hovering — lower middle finger to draw';
+    return;
+  }
+
+  // ── IDLE ─────────────────────────────────────────────────────────────────
+  statusBar.textContent = '✋ Raise index finger to draw';
+}
+
+// ── Launch camera + MediaPipe ─────────────────────────────────────────────────
+document.getElementById('launchBtn').addEventListener('click', async () => {
+  errorMsg.style.display = 'none';
+  startScreen.style.display = 'none';
+  loadingOverlay.style.display = 'flex';
+  loadingText.textContent = 'Requesting camera…';
+
+  try {
+    // Use 640×480 — MediaPipe runs 2× faster than 1280×720, latency drops ~40ms
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user',
+               frameRate: { ideal: 60 } }
+    });
+    video.srcObject = stream;
+    await new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
+
+    loadingText.textContent = 'Loading MediaPipe Hands…';
+
+    const hands = new Hands({ locateFile: f => `${MEDIAPIPE_CDN}${f}` });
+    hands.setOptions({
+      maxNumHands:            1,
+      modelComplexity:        0,        // 0 = lite model → lower latency
+      minDetectionConfidence: 0.80,     // higher = fewer false positives
+      minTrackingConfidence:  0.80      // higher = more stable tracking
+    });
+    hands.onResults(onResults);
+
+    loadingText.textContent = 'Starting…';
+
+    const cam = new Camera(video, {
+      onFrame: async () => { await hands.send({ image: video }); },
+      width: 640, height: 480
+    });
+    cam.start();
+
+    loadingOverlay.style.display = 'none';
+    statusBar.textContent = '✋ Show your hand to the camera';
+
+  } catch (err) {
+    loadingOverlay.style.display = 'none';
+    startScreen.style.display = 'flex';
+    errorMsg.style.display = 'block';
+    errorMsg.textContent = err.name === 'NotAllowedError'
+      ? '❌ Camera access denied. Allow camera in browser settings.'
+      : `❌ ${err.message}`;
+  }
+});
+</script>
+</body>
+</html>
